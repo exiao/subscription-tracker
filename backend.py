@@ -1,23 +1,37 @@
 """
-Subscription Tracker - FastAPI + OpenRouter/Gemini Flash
+Subscription Tracker - FastAPI + OpenRouter/Gemini Flash with Structured Outputs
 """
 
-import os, json, uuid, pdfplumber
+import os, uuid, pdfplumber
 from io import BytesIO
-from dataclasses import dataclass
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from openrouter import OpenRouter
+from pydantic import BaseModel, Field
 
 app = FastAPI()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 sessions: dict = {}
 
 
-@dataclass
-class Sub:
+# Pydantic models for structured LLM output
+class SubscriptionItem(BaseModel):
+    name: str = Field(description="Name of the subscription service (e.g. Netflix, Spotify)")
+    amount: float = Field(description="Amount charged per billing cycle")
+    frequency: str = Field(description="Billing frequency: monthly, yearly, or weekly")
+    last_charged: str = Field(description="Date of most recent charge (YYYY-MM-DD)")
+    count: int = Field(description="Number of times this subscription appears in the statement")
+    cancel_url: str = Field(default="", description="URL to cancel the subscription")
+
+
+class SubscriptionList(BaseModel):
+    subscriptions: list[SubscriptionItem] = Field(description="List of ALL recurring subscriptions found")
+
+
+# Internal model with computed fields
+class Sub(BaseModel):
     id: str
     name: str
     amount: float
@@ -30,17 +44,16 @@ class Sub:
     cancel_url: str = ""
 
 
-PROMPT = """Extract subscriptions from this bank statement.
+PROMPT = """Extract ALL recurring subscriptions from this bank statement.
 
 Known services (with cancel URLs):
-- Netflix (netflix.com/cancelplan), Spotify (spotify.com/account), YouTube Premium, Hulu, Disney+, HBO Max, Amazon Prime, Apple TV+
-- ChatGPT Plus (chat.openai.com/settings), Claude Pro (claude.ai/settings), GitHub Copilot (github.com/settings/copilot), Cursor, Midjourney
-- Notion (notion.so/my-account), Dropbox, Adobe, Microsoft 365, 1Password, iCloud, Google One
+- Netflix (netflix.com/cancelplan), Spotify (spotify.com/account), YouTube Premium, Hulu, Disney+, HBO Max, Amazon Prime (amazon.com/prime/manage), Apple/iCloud (apple.com/account)
+- ChatGPT Plus (chat.openai.com/settings), Claude Pro (claude.ai/settings), GitHub (github.com/settings/billing), Cursor, Midjourney
+- Notion (notion.so/my-account), Dropbox, Adobe (account.adobe.com), Microsoft 365, 1Password, Google One
 - X Premium, Discord Nitro (discord.com/settings/subscriptions), LinkedIn Premium
 - NYTimes, WSJ, Substack, Planet Fitness, Equinox, Peloton, ClassPass
 
-Return ONLY this JSON:
-{"subscriptions": [{"name": "Netflix", "amount": 15.99, "frequency": "monthly", "last_charged": "2024-01-15", "count": 3, "cancel_url": "netflix.com/cancelplan"}]}
+Include EVERY recurring subscription. Do not skip any.
 
 Bank statement:
 """
@@ -67,32 +80,36 @@ def parse(content: bytes, filename: str) -> list[Sub] | str:
     
     try:
         with OpenRouter(api_key=api_key) as client:
+            # Use structured outputs with Pydantic schema
             resp = client.chat.send(
                 model="google/gemini-2.0-flash-001",
                 messages=[{"role": "user", "content": PROMPT + text[:50000]}],
-                temperature=0.1, max_tokens=8000
+                temperature=0.1,
+                max_tokens=8000,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "subscriptions",
+                        "strict": True,
+                        "schema": SubscriptionList.model_json_schema()
+                    }
+                }
             )
+            
+            # Parse with Pydantic validation
             result = resp.choices[0].message.content.strip()
+            data = SubscriptionList.model_validate_json(result)
             
-            # Clean JSON
-            if "```" in result:
-                result = result.replace("```json", "").replace("```", "").strip()
-            start, end = result.find("{"), result.rfind("}") + 1
-            if start >= 0 and end > start:
-                result = result[start:end]
-            
-            data = json.loads(result)
             subs = []
-            for i, s in enumerate(data.get("subscriptions", [])):
-                amt = float(s.get("amount", 0))
-                freq = s.get("frequency", "monthly").lower()
-                monthly = amt if freq == "monthly" else amt/12 if freq == "yearly" else amt*4.33
-                yearly = amt*12 if freq == "monthly" else amt if freq == "yearly" else amt*52
+            for i, s in enumerate(data.subscriptions):
+                freq = s.frequency.lower()
+                monthly = s.amount if freq == "monthly" else s.amount/12 if freq == "yearly" else s.amount*4.33
+                yearly = s.amount*12 if freq == "monthly" else s.amount if freq == "yearly" else s.amount*52
                 subs.append(Sub(
-                    id=f"s{i}", name=s.get("name", "?"), amount=amt, frequency=freq,
-                    last_charged=s.get("last_charged", ""), count=int(s.get("count", 1)),
+                    id=f"s{i}", name=s.name, amount=s.amount, frequency=freq,
+                    last_charged=s.last_charged, count=s.count,
                     monthly=round(monthly, 2), yearly=round(yearly, 2),
-                    cancel_url=s.get("cancel_url", "")
+                    cancel_url=s.cancel_url
                 ))
             return subs
     except Exception as e:
@@ -124,33 +141,6 @@ async def upload(request: Request, files: list[UploadFile] = File(...), sid: str
         "total_yearly": round(sum(s.yearly for s in subs), 2)
     })
 
-
-@app.post("/categorize/{sub_id}", response_class=HTMLResponse)
-async def categorize(request: Request, sub_id: str, category: str = Form(...), sid: str = Form(...)):
-    for s in sessions.get(sid, []):
-        if s.id == sub_id:
-            s.category = category
-    subs = sessions.get(sid, [])
-    return templates.TemplateResponse("index.html", {
-        "request": request, "sid": sid, "subs": subs,
-        "total_monthly": round(sum(s.monthly for s in subs), 2),
-        "total_yearly": round(sum(s.yearly for s in subs), 2)
-    })
-
-
-@app.get("/report", response_class=HTMLResponse)
-async def report(request: Request, sid: str):
-    subs = sessions.get(sid, [])
-    return templates.TemplateResponse("report.html", {
-        "request": request,
-        "keep": [s for s in subs if s.category == "keep"],
-        "cancel": [s for s in subs if s.category == "cancel"],
-        "investigate": [s for s in subs if s.category == "investigate"],
-        "pending": [s for s in subs if s.category == "pending"],
-        "savings": round(sum(s.yearly for s in subs if s.category == "cancel"), 2),
-        "total_yearly": round(sum(s.yearly for s in subs), 2),
-        "total": len(subs)
-    })
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ subscription-tracker/
 ## Run
 
 ```bash
-# install uv - https://docs.astral.sh/uv/getting-started/installation/
+# Install uv: https://docs.astral.sh/uv/getting-started/installation/
 uv venv
 uv pip install -r requirements.txt
 source .env.local
