@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subscription Audit Report</title>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        :root { --bg: #0a0a0b; --card: #141416; --border: #2a2a2e; --text: #fafafa; --muted: #71717a; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --purple: #a855f7; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'SF Mono', monospace; background: var(--bg); color: var(--text); padding: 2rem; }
+        .container { max-width: 700px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 2rem; }
+        
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem; }
+        .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; text-align: center; }
+        .stat-value { font-size: 2rem; font-weight: 700; }
+        .stat-value.savings { color: var(--green); }
+        .stat-value.spending { color: var(--red); }
+        .stat-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; }
+        
+        .controls { display: flex; justify-content: space-between; margin-bottom: 2rem; padding: 1rem; background: var(--card); border-radius: 12px; }
+        .toggle { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+        .btn { padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); cursor: pointer; }
+        
+        .section { margin-bottom: 1.5rem; }
+        .section-header { padding: 1rem; background: var(--card); border: 1px solid var(--border); border-radius: 8px 8px 0 0; cursor: pointer; display: flex; justify-content: space-between; }
+        .section.cancel .section-header { border-left: 4px solid var(--red); }
+        .section.keep .section-header { border-left: 4px solid var(--green); }
+        .section.investigate .section-header { border-left: 4px solid var(--yellow); }
+        .section-content { border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px; }
+        .item { display: flex; justify-content: space-between; padding: 1rem; border-bottom: 1px solid var(--border); }
+        .item:last-child { border-bottom: none; }
+        .item-name { font-weight: 500; }
+        .item-name.blur { filter: blur(6px); user-select: none; }
+        .item-amount { color: var(--purple); font-weight: 600; }
+        
+        @media print { .controls { display: none; } body { background: white; color: black; } }
+    </style>
+</head>
+<body x-data="{ privacy: false }">
+<div class="container">
+    <h1>📋 Subscription Audit</h1>
+    
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-value">{{ total }}</div>
+            <div class="stat-label">Found</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value spending">${{ "%.0f"|format(total_yearly) }}</div>
+            <div class="stat-label">Yearly</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value savings">${{ "%.0f"|format(savings) }}</div>
+            <div class="stat-label">Savings</div>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <label class="toggle">
+            <input type="checkbox" x-model="privacy">
+            <span>🔒 Privacy mode</span>
+        </label>
+        <button class="btn" onclick="window.print()">🖨️ Print</button>
+    </div>
+    
+    {% if cancel %}
+    <div class="section cancel" x-data="{ open: true }">
+        <div class="section-header" @click="open = !open">
+            <span>🗑️ Cancel ({{ cancel|length }})</span>
+            <span>${{ "%.0f"|format(cancel|sum(attribute='yearly')) }}/yr</span>
+        </div>
+        <div class="section-content" x-show="open">
+            {% for s in cancel %}
+            <div class="item">
+                <span class="item-name" :class="{ 'blur': privacy }">{{ s.name }}</span>
+                <span class="item-amount">${{ "%.2f"|format(s.yearly) }}/yr</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if investigate %}
+    <div class="section investigate" x-data="{ open: true }">
+        <div class="section-header" @click="open = !open">
+            <span>🔍 Investigate ({{ investigate|length }})</span>
+            <span>${{ "%.0f"|format(investigate|sum(attribute='yearly')) }}/yr</span>
+        </div>
+        <div class="section-content" x-show="open">
+            {% for s in investigate %}
+            <div class="item">
+                <span class="item-name" :class="{ 'blur': privacy }">{{ s.name }}</span>
+                <span class="item-amount">${{ "%.2f"|format(s.yearly) }}/yr</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if keep %}
+    <div class="section keep" x-data="{ open: false }">
+        <div class="section-header" @click="open = !open">
+            <span>✓ Keep ({{ keep|length }})</span>
+            <span>${{ "%.0f"|format(keep|sum(attribute='yearly')) }}/yr</span>
+        </div>
+        <div class="section-content" x-show="open">
+            {% for s in keep %}
+            <div class="item">
+                <span class="item-name" :class="{ 'blur': privacy }">{{ s.name }}</span>
+                <span class="item-amount">${{ "%.2f"|format(s.yearly) }}/yr</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if pending %}
+    <div class="section" x-data="{ open: false }">
+        <div class="section-header" @click="open = !open">
+            <span>⏳ Pending ({{ pending|length }})</span>
+            <span>${{ "%.0f"|format(pending|sum(attribute='yearly')) }}/yr</span>
+        </div>
+        <div class="section-content" x-show="open">
+            {% for s in pending %}
+            <div class="item">
+                <span class="item-name" :class="{ 'blur': privacy }">{{ s.name }}</span>
+                <span class="item-amount">${{ "%.2f"|format(s.yearly) }}/yr</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+</body>
+</html>
+

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>just fucking cancel</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        :root { --bg: #0a0a0b; --card: #141416; --border: #2a2a2e; --text: #fafafa; --muted: #71717a; --blue: #3b82f6; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --purple: #a855f7; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'SF Mono', monospace; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { font-size: 2.5rem; text-align: center; margin-bottom: 0.5rem; }
+        .subtitle { text-align: center; color: var(--muted); margin-bottom: 2rem; }
+        
+        /* Upload */
+        .dropzone { border: 2px dashed var(--border); border-radius: 16px; padding: 4rem 2rem; text-align: center; background: var(--card); cursor: pointer; position: relative; transition: border-color 0.2s; }
+        .dropzone:hover { border-color: var(--blue); }
+        .dropzone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        .dropzone h3 { margin: 1rem 0 0.5rem; }
+        .dropzone p { color: var(--muted); font-size: 0.875rem; }
+        .privacy { text-align: center; margin-top: 1rem; padding: 0.75rem; background: var(--card); border-radius: 8px; font-size: 0.75rem; color: var(--muted); }
+        .htmx-indicator { display: none; }
+        .htmx-request .htmx-indicator { display: block; }
+        .htmx-request .dropzone-content { display: none; }
+        .spinner { display: inline-block; width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        /* Results */
+        .header { display: flex; justify-content: space-between; align-items: center; margin: 2rem 0 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+        .totals .amount { font-size: 1.5rem; font-weight: 700; color: var(--red); }
+        .totals .label { font-size: 0.75rem; color: var(--muted); }
+        .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding: 1rem; background: var(--card); border-radius: 12px; }
+        .toggle { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+        .btn { padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); cursor: pointer; font-family: inherit; text-decoration: none; font-size: 0.875rem; }
+        .btn:hover { background: var(--bg); }
+        .btn-primary { background: var(--blue); border-color: var(--blue); }
+        
+        /* Cards */
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; }
+        .card.keep { border-left: 4px solid var(--green); }
+        .card.cancel { border-left: 4px solid var(--red); }
+        .card.investigate { border-left: 4px solid var(--yellow); }
+        .card-header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
+        .card-name { font-size: 1.125rem; font-weight: 600; }
+        .card-name.blur { filter: blur(6px); user-select: none; }
+        .card-amount { font-size: 1.25rem; font-weight: 700; color: var(--purple); }
+        .card-meta { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; font-size: 0.75rem; color: var(--muted); }
+        .card-meta a { color: var(--red); text-decoration: none; }
+        .actions { display: flex; gap: 0.5rem; }
+        .actions .btn.active-keep { background: rgba(34,197,94,0.15); border-color: var(--green); color: var(--green); }
+        .actions .btn.active-cancel { background: rgba(239,68,68,0.15); border-color: var(--red); color: var(--red); }
+        .actions .btn.active-investigate { background: rgba(234,179,8,0.15); border-color: var(--yellow); color: var(--yellow); }
+        
+        .error { background: rgba(239,68,68,0.1); border: 1px solid var(--red); border-radius: 12px; padding: 1.5rem; text-align: center; color: var(--red); margin: 2rem 0; }
+        .footer { text-align: center; margin-top: 3rem; color: var(--muted); font-size: 0.75rem; }
+    </style>
+</head>
+<body x-data="{ privacy: false }">
+<div class="container">
+    <h1>just fucking cancel</h1>
+    <p class="subtitle">Find and cancel forgotten subscriptions</p>
+    
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+    
+    {% if not subs %}
+    <!-- Upload Form -->
+    <form hx-post="/upload" hx-target="body" hx-encoding="multipart/form-data" hx-indicator=".htmx-indicator">
+        <input type="hidden" name="sid" value="{{ sid }}">
+        <div class="dropzone">
+            <div class="dropzone-content">
+                <div style="font-size: 3rem;">📄</div>
+                <h3>Drop your bank statements here</h3>
+                <p>CSV or PDF from any bank • Takes under 90 seconds</p>
+            </div>
+            <div class="htmx-indicator" style="padding: 2rem;">
+                <div class="spinner"></div>
+                <p style="margin-top: 1rem; color: var(--muted);">Analyzing...</p>
+            </div>
+            <input type="file" name="files" multiple accept=".csv,.pdf" onchange="this.form.requestSubmit()">
+        </div>
+    </form>
+    <div class="privacy">🔒 Files analyzed via API, never stored</div>
+    
+    {% else %}
+    <!-- Results -->
+    <div class="header">
+        <h2>Found {{ subs|length }} subscriptions</h2>
+        <div class="totals">
+            <div class="amount">${{ "%.2f"|format(total_yearly) }}/yr</div>
+            <div class="label">${{ "%.2f"|format(total_monthly) }}/mo</div>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <label class="toggle">
+            <input type="checkbox" x-model="privacy">
+            <span>Privacy mode</span>
+        </label>
+        <a href="/report?sid={{ sid }}" class="btn btn-primary" target="_blank">Generate Report →</a>
+    </div>
+    
+    {% for sub in subs %}
+    <form hx-post="/categorize/{{ sub.id }}" hx-target="body" hx-trigger="click from:.cat-btn-{{ sub.id }}">
+        <input type="hidden" name="sid" value="{{ sid }}">
+        <input type="hidden" name="category" value="" class="cat-input-{{ sub.id }}">
+        <div class="card {{ sub.category }}">
+            <div class="card-header">
+                <span class="card-name" :class="{ 'blur': privacy }">{{ sub.name }}</span>
+                <span class="card-amount">${{ "%.2f"|format(sub.amount) }}</span>
+            </div>
+            <div class="card-meta">
+                <span>{{ sub.frequency }}</span>
+                <span>{{ sub.count }}x charged</span>
+                <span>${{ "%.2f"|format(sub.yearly) }}/yr</span>
+                {% if sub.cancel_url %}<a href="https://{{ sub.cancel_url }}" target="_blank">Cancel →</a>{% endif %}
+            </div>
+            <div class="actions">
+                <button type="button" class="btn cat-btn-{{ sub.id }} {{ 'active-keep' if sub.category == 'keep' }}" onclick="document.querySelector('.cat-input-{{ sub.id }}').value='keep'; htmx.trigger(this.closest('form'), 'submit')">✓ Keep</button>
+                <button type="button" class="btn cat-btn-{{ sub.id }} {{ 'active-cancel' if sub.category == 'cancel' }}" onclick="document.querySelector('.cat-input-{{ sub.id }}').value='cancel'; htmx.trigger(this.closest('form'), 'submit')">✕ Cancel</button>
+                <button type="button" class="btn cat-btn-{{ sub.id }} {{ 'active-investigate' if sub.category == 'investigate' }}" onclick="document.querySelector('.cat-input-{{ sub.id }}').value='investigate'; htmx.trigger(this.closest('form'), 'submit')">? Investigate</button>
+            </div>
+        </div>
+    </form>
+    {% endfor %}
+    {% endif %}
+    
+    <div class="footer">HTMX + Alpine.js + FastAPI</div>
+</div>
+</body>
+</html>
+
